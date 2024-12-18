@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/go-acme/lego/v4/challenge/dns01"
 )
@@ -16,9 +17,10 @@ type DNSChallenge struct {
 }
 
 type CustomDNSProvider struct {
-	challenges []DNSChallenge
-	mu         sync.RWMutex
-	ready      chan DNSChallenge
+	challenges   []DNSChallenge
+	mu           sync.RWMutex
+	ready        chan DNSChallenge
+	resolveDelay time.Duration // добавляем задержку
 }
 
 var (
@@ -29,14 +31,15 @@ var (
 func GetInstance() *CustomDNSProvider {
 	once.Do(func() {
 		instance = &CustomDNSProvider{
-			challenges: []DNSChallenge{},
-			ready:      make(chan DNSChallenge, 100), // Увеличиваем буфер
+			challenges:   []DNSChallenge{},
+			ready:        make(chan DNSChallenge, 100),
+			resolveDelay: 60 * time.Second,
 		}
 	})
 	return instance
 }
 
-// Present registers the challenge
+// Present registers the challenge and adds a delay before resolution
 func (p *CustomDNSProvider) Present(domain, token, keyAuth string) error {
 	challengeInfo := dns01.GetChallengeInfo(domain, keyAuth)
 	txtValue := challengeInfo.Value
@@ -51,12 +54,14 @@ func (p *CustomDNSProvider) Present(domain, token, keyAuth string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	// Check for duplicate challenges
 	for _, existing := range p.challenges {
 		if existing.Identifier == domain && existing.Content == txtValue {
 			return nil
 		}
 	}
 
+	// Add the new challenge
 	p.challenges = append(p.challenges, challenge)
 
 	select {
@@ -65,12 +70,21 @@ func (p *CustomDNSProvider) Present(domain, token, keyAuth string) error {
 		fmt.Println("Challenge channel is full")
 	}
 
+	// Return JSON response immediately
 	challengeJSON, err := json.Marshal(challenge)
 	if err != nil {
 		return fmt.Errorf("could not marshal challenge to JSON: %w", err)
 	}
 
 	fmt.Printf("Challenge Info: %s\n", challengeJSON)
+
+	// Add delay before resolution
+	go func() {
+		time.Sleep(p.resolveDelay)
+		// Можно добавить дополнительную логику для обработки challenge после задержки
+		fmt.Printf("Challenge for domain %s is now ready to resolve\n", domain)
+	}()
+
 	return nil
 }
 

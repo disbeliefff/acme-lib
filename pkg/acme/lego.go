@@ -6,11 +6,12 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"fmt"
-	providers "github.com/disbeliefff/acme-lib/pkg/porviders"
 
+	"log/slog"
+
+	providers "github.com/disbeliefff/acme-lib/pkg/porviders"
 	"github.com/go-acme/lego/v4/lego"
 	"github.com/go-acme/lego/v4/registration"
-	"log/slog"
 )
 
 type ACMEProcessor struct {
@@ -121,4 +122,13 @@ func (c *ACMEProcessor) SetDNSChallengeProvider() error {
 
 func (c *ACMEProcessor) GetClient() *lego.Client {
 	return c.Client
+}
+
+// Внутри pkg/acme/ACMEProcessor.go
+
+// ChallengeInfo представляет информацию о вызове
+type ChallengeInfo struct {
+	Token   string
+	KeyAuth string
+	Path    string
 }
