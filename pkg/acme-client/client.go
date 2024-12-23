@@ -9,7 +9,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/disbeliefff/acme-lib/pkg/lib"
+	"github.com/disbeliefff/acme-lib/pkg/lib/logging"
+	lib "github.com/disbeliefff/acme-lib/pkg/lib/utils"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/acme"
 )
@@ -25,13 +26,13 @@ type Config struct {
 	// LEdir is the Let's Encrypt directory URL
 	LEdir string
 	// Logger is the zap logger instance for logging
-	Logger *zap.Logger
+	Logger logging.Logger
 }
 
 // Client represents an ACME client instance that handles certificate operations
 type Client struct {
 	challenges sync.Map
-	config     Config
+	Config     Config
 }
 
 // New creates a new instance of the ACME client with the provided configuration
@@ -47,7 +48,7 @@ func New(cfg Config) (*Client, error) {
 		return nil, errors.New("logger is required")
 	}
 	return &Client{
-		config: cfg,
+		Config: cfg,
 	}, nil
 }
 
@@ -59,10 +60,10 @@ func New(cfg Config) (*Client, error) {
 // Returns:
 //   - *acme.Client: New ACME client instance
 func (c *Client) NewACMEClient(key *ecdsa.PrivateKey) *acme.Client {
-	c.config.Logger.Info("creating new ACME client", zap.String("LEdir", c.config.LEdir))
+	c.Config.Logger.Info("creating new ACME client", zap.String("LEdir", c.Config.LEdir))
 	return &acme.Client{
 		Key:          key,
-		DirectoryURL: c.config.LEdir,
+		DirectoryURL: c.Config.LEdir,
 	}
 }
 
@@ -81,7 +82,7 @@ func (c *Client) CreateAccount(ctx context.Context, contact string) (*acme.Accou
 		ctx = context.Background()
 	}
 
-	c.config.Logger.Info("creating new ACME account", zap.String("contact", contact))
+	c.Config.Logger.Info("creating new ACME account", zap.String("contact", contact))
 
 	accountKey, err := lib.GenerateKey()
 	if err != nil {
@@ -92,13 +93,13 @@ func (c *Client) CreateAccount(ctx context.Context, contact string) (*acme.Accou
 	account := &acme.Account{Contact: []string{contact}}
 
 	acc, err := client.Register(ctx, account, func(tosURL string) bool {
-		c.config.Logger.Info("accepting terms of service", zap.String("tosURL", tosURL))
+		c.Config.Logger.Info("accepting terms of service", zap.String("tosURL", tosURL))
 		return true
 	})
 
 	if err != nil {
 		if strings.Contains(err.Error(), "account already exists") {
-			c.config.Logger.Info("account already exists, retrieving", zap.String("contact", contact))
+			c.Config.Logger.Info("account already exists, retrieving", zap.String("contact", contact))
 			acc, err = client.GetReg(ctx, "")
 			if err != nil {
 				return nil, nil, fmt.Errorf("get existing account: %w", err)
@@ -108,7 +109,7 @@ func (c *Client) CreateAccount(ctx context.Context, contact string) (*acme.Accou
 		return nil, nil, fmt.Errorf("register account: %w", err)
 	}
 
-	c.config.Logger.Info("account created successfully", zap.String("contact", acc.Contact[0]))
+	c.Config.Logger.Info("account created successfully", zap.String("contact", acc.Contact[0]))
 	return acc, accountKey, nil
 }
 
@@ -144,7 +145,7 @@ func (c *Client) handleChallenge(client *acme.Client, challenge *acme.Challenge,
 //   - string: Challenge response
 //   - error: Error if response generation fails
 func (c *Client) RespondChallenge(challenge *acme.Challenge, domain string, accountKey *ecdsa.PrivateKey) (string, error) {
-	c.config.Logger.Info("responding to challenge",
+	c.Config.Logger.Info("responding to challenge",
 		zap.String("domain", domain),
 		zap.String("challengeType", challenge.Type))
 
@@ -173,7 +174,7 @@ func (c *Client) GetChallenge(ctx context.Context, order *acme.Order, accountKey
 		ctx = context.Background()
 	}
 
-	c.config.Logger.Info("retrieving challenge",
+	c.Config.Logger.Info("retrieving challenge",
 		zap.String("challengeType", challengeType))
 
 	client := c.NewACMEClient(accountKey)
@@ -181,7 +182,7 @@ func (c *Client) GetChallenge(ctx context.Context, order *acme.Order, accountKey
 	for _, authz := range order.AuthzURLs {
 		authorization, err := client.GetAuthorization(ctx, authz)
 		if err != nil {
-			c.config.Logger.Error("failed to fetch authorization",
+			c.Config.Logger.Error("failed to fetch authorization",
 				zap.String("authURL", authz),
 				zap.Error(err))
 			return nil, fmt.Errorf("fetch authorization %s: %w", authz, err)
@@ -189,7 +190,7 @@ func (c *Client) GetChallenge(ctx context.Context, order *acme.Order, accountKey
 
 		for _, challenge := range authorization.Challenges {
 			if challenge.Type == challengeType {
-				c.config.Logger.Info("challenge found",
+				c.Config.Logger.Info("challenge found",
 					zap.String("challengeType", challengeType),
 					zap.String("authURL", authz))
 				return challenge, nil
@@ -197,7 +198,7 @@ func (c *Client) GetChallenge(ctx context.Context, order *acme.Order, accountKey
 		}
 	}
 
-	c.config.Logger.Error("no matching challenge found",
+	c.Config.Logger.Error("no matching challenge found",
 		zap.String("challengeType", challengeType))
 	return nil, fmt.Errorf("no %s challenge found", challengeType)
 }
@@ -220,23 +221,23 @@ func (c *Client) FinalizeOrderWithCert(ctx context.Context, client *acme.Client,
 		ctx = context.Background()
 	}
 
-	c.config.Logger.Info("finalizing order",
+	c.Config.Logger.Info("finalizing order",
 		zap.String("finalizeURL", order.FinalizeURL))
 
 	csrBlock, _ := pem.Decode(csrPem)
 	if csrBlock == nil || csrBlock.Type != "CERTIFICATE REQUEST" {
-		c.config.Logger.Error("invalid CSR format")
+		c.Config.Logger.Error("invalid CSR format")
 		return nil, "", errors.New("invalid CSR format")
 	}
 
 	certs, certURL, err := client.CreateOrderCert(ctx, order.FinalizeURL, csrBlock.Bytes, bundle)
 	if err != nil {
-		c.config.Logger.Error("failed to finalize order",
+		c.Config.Logger.Error("failed to finalize order",
 			zap.Error(err))
 		return nil, "", fmt.Errorf("create order certificate: %w", err)
 	}
 
-	c.config.Logger.Info("order finalized successfully",
+	c.Config.Logger.Info("order finalized successfully",
 		zap.String("certURL", certURL))
 	return certs, certURL, nil
 }
@@ -256,7 +257,7 @@ func (c *Client) RevokeCertificate(ctx context.Context, certPem []byte, accountK
 		ctx = context.Background()
 	}
 
-	c.config.Logger.Info("revoking certificate")
+	c.Config.Logger.Info("revoking certificate")
 
 	block, _ := pem.Decode(certPem)
 	if block == nil {
@@ -268,6 +269,6 @@ func (c *Client) RevokeCertificate(ctx context.Context, certPem []byte, accountK
 		return fmt.Errorf("revoke certificate: %w", err)
 	}
 
-	c.config.Logger.Info("certificate revoked successfully")
+	c.Config.Logger.Info("certificate revoked successfully")
 	return nil
 }
