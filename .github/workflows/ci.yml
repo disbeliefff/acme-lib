@@ -69,7 +69,10 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v3
 
-      - name: Run GoSec
+      - name: Install GoSec
         run: |
           curl -sSfL https://raw.githubusercontent.com/securego/gosec/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.18.1
-          gosec ./...
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+
+      - name: Run GoSec
+        run: gosec ./...
